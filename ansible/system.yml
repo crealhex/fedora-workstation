@@ -230,15 +230,6 @@
         mode: "0440"
         validate: "visudo -cf %s"
 
-    # ── Static IP (must be last — network will drop) ──────────────────
-    - name: Set static IP address
-      command: nmcli con mod "{{ net_connection }}" ipv4.method manual ipv4.addresses 192.168.18.10/24 ipv4.gateway 192.168.18.1 ipv4.dns "1.1.1.1 1.0.0.1 8.8.8.8 8.8.4.4"
-      when: static_ip | default(false) | bool
-
-    - name: Restart NetworkManager connection
-      command: nmcli con up "{{ net_connection }}"
-      when: static_ip | default(false) | bool
-
   handlers:
     - name: Reload systemd
       systemd:
