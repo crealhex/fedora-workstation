@@ -1,0 +1,125 @@
+---
+- name: Configure Fedora Workstation (user)
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    # ── Java Ecosystem (SDKMAN) ───────────────────────────────────────
+    - name: Install SDKMAN
+      shell: curl -s "https://get.sdkman.io" | bash
+      args:
+        creates: ~/.sdkman/bin/sdkman-init.sh
+
+    - name: Install Java versions via SDKMAN
+      shell: |
+        source ~/.sdkman/bin/sdkman-init.sh
+        sdk install java
+        JAVA_21=$(sdk list java 2>/dev/null | grep -oP '\s21\.\d+\.\d+(\.\d+)?-tem' | tr -d ' ' | head -1)
+        [ -n "$JAVA_21" ] && yes n | sdk install java $JAVA_21
+        JAVA_17=$(sdk list java 2>/dev/null | grep -oP '\s17\.\d+\.\d+(\.\d+)?-tem' | tr -d ' ' | head -1)
+        [ -n "$JAVA_17" ] && yes n | sdk install java $JAVA_17
+      args:
+        executable: /bin/bash
+
+    - name: Install Gradle, Maven, and Quarkus via SDKMAN
+      shell: |
+        source ~/.sdkman/bin/sdkman-init.sh
+        sdk install gradle
+        sdk install maven
+        sdk install quarkus
+      args:
+        executable: /bin/bash
+
+    # ── JavaScript/TypeScript ─────────────────────────────────────────
+    - name: Install fnm
+      shell: curl -fsSL https://fnm.vercel.app/install | bash
+      args:
+        creates: ~/.local/share/fnm/fnm
+
+    - name: Install Node.js LTS via fnm
+      shell: |
+        export PATH="$HOME/.local/share/fnm:$PATH"
+        eval "$(fnm env)"
+        fnm install --lts
+      args:
+        executable: /bin/bash
+
+    # ── Python ────────────────────────────────────────────────────────
+    - name: Install uv
+      shell: curl -fsSL https://astral.sh/uv/install.sh | sh
+      args:
+        creates: ~/.local/bin/uv
+
+    - name: Install Bun
+      shell: curl -fsSL https://bun.sh/install | bash
+      args:
+        creates: ~/.bun/bin/bun
+
+    # ── AI Coding CLIs ────────────────────────────────────────────────
+    - name: Install Claude Code
+      shell: curl -fsSL https://claude.ai/install.sh | bash
+      args:
+        creates: ~/.local/bin/claude
+
+    - name: Install GPT Codex
+      shell: |
+        export BUN_INSTALL="$HOME/.bun"
+        export PATH="$BUN_INSTALL/bin:$PATH"
+        bun install -g @openai/codex
+      args:
+        executable: /bin/bash
+
+    # ── Display Config ────────────────────────────────────────────────
+    - name: Create GNOME config directory
+      file:
+        path: ~/.config
+        state: directory
+
+    - name: Restore monitors.xml
+      copy:
+        src: files/monitors.xml
+        dest: ~/.config/monitors.xml
+
+    # ── Shell Customization ───────────────────────────────────────────
+    - name: Configure shell prompt and aliases
+      blockinfile:
+        path: ~/.bashrc
+        marker: "# {mark} WORKSTATION CONFIG"
+        block: |
+          export PS1='\[\e[1;32m\]\u@\h\[\e[0m\] \[\e[1;34m\]\W\[\e[0m\] \$ '
+          alias fig='docker compose'
+          alias vim='nvim'
+
+    - name: Configure GNU Screen defaults
+      blockinfile:
+        path: ~/.screenrc
+        create: true
+        marker: "# {mark} WORKSTATION SCREEN CONFIG"
+        block: |
+          escape ^Vv
+          term "screen-256color"
+          truecolor on
+
+    - name: Disable GNOME automatic suspend
+      shell: |
+        gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
+        gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type 'nothing'
+        gsettings set org.gnome.desktop.session idle-delay 0
+      args:
+        executable: /bin/bash
+
+    - name: Configure Git user name
+      ini_file:
+        path: ~/.gitconfig
+        section: user
+        option: name
+        value: Luis Enco
+        create: true
+
+    - name: Configure Git user email
+      ini_file:
+        path: ~/.gitconfig
+        section: user
+        option: email
+        value: 38085121+crealhex@users.noreply.github.com
+        create: true

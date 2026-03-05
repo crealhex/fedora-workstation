@@ -1,0 +1,14 @@
+[Unit]
+Description=Kali VM RDP Forwarding (Port 33389)
+After=network.target
+
+[Service]
+Type=simple
+# The "Magic Command" that actually worked
+ExecStart=/usr/bin/socat TCP-LISTEN:33389,fork,bind=0.0.0.0 TCP:192.168.122.153:3389
+# Restart automatically if it ever dies
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

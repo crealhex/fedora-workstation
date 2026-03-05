@@ -1,0 +1,255 @@
+---
+- name: Configure Fedora Workstation (system)
+  hosts: all
+  gather_facts: false
+  become: true
+
+  tasks:
+    # ── System Foundation ──────────────────────────────────────────────
+    - name: Wait for machine to be reachable
+      wait_for_connection:
+        timeout: 120
+
+    - name: Gather facts
+      setup:
+
+    - name: Install system packages
+      dnf:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg2
+          - git
+          - make
+          - unzip
+          - zip
+          - python3-pip
+          - wget
+          - gcc
+          - gcc-c++
+          - kernel-devel
+          - socat
+          - screen
+          - tmux
+        state: present
+
+    - name: Install Neovim (latest stable)
+      shell: |
+        curl -fsSL https://github.com/neovim/neovim/releases/latest/download/nvim-linux-x86_64.tar.gz -o /tmp/nvim.tar.gz
+        tar xzf /tmp/nvim.tar.gz -C /opt
+        ln -sf /opt/nvim-linux-x86_64/bin/nvim /usr/local/bin/nvim
+        rm /tmp/nvim.tar.gz
+      args:
+        creates: /opt/nvim-linux-x86_64/bin/nvim
+
+    # ── Swap ──────────────────────────────────────────────────────────
+    - name: Create 8GB swap file
+      command: fallocate -l 8G /swapfile
+      args:
+        creates: /swapfile
+
+    - name: Set swap file permissions
+      file:
+        path: /swapfile
+        mode: "0600"
+
+    - name: Format swap file
+      command: mkswap /swapfile
+      register: mkswap_result
+      changed_when: mkswap_result.rc == 0
+      when: ansible_swaptotal_mb == 0
+
+    - name: Enable swap file
+      command: swapon /swapfile
+      when: ansible_swaptotal_mb == 0
+
+    - name: Persist swap in fstab
+      lineinfile:
+        path: /etc/fstab
+        line: "/swapfile none swap sw 0 0"
+        state: present
+
+    # ── Docker ─────────────────────────────────────────────────────────
+    - name: Add Docker repo
+      shell: dnf config-manager addrepo --from-repofile=https://download.docker.com/linux/fedora/docker-ce.repo
+      args:
+        creates: /etc/yum.repos.d/docker-ce.repo
+
+    - name: Install Docker
+      dnf:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+
+    - name: Enable and start Docker
+      systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Add warender to docker group
+      user:
+        name: warender
+        groups: docker
+        append: true
+
+    # ── CLI Tools ─────────────────────────────────────────────────────
+    - name: Add HashiCorp repo
+      shell: dnf config-manager addrepo --from-repofile=https://rpm.releases.hashicorp.com/fedora/hashicorp.repo
+      args:
+        creates: /etc/yum.repos.d/hashicorp.repo
+
+    - name: Install Terraform, gh, and Ansible
+      dnf:
+        name:
+          - terraform
+          - gh
+          - ansible
+        state: present
+
+    - name: Install Azure CLI
+      pip:
+        name: azure-cli
+        state: present
+
+    - name: Install Mutagen
+      shell: |
+        MUTAGEN_VERSION=$(curl -fsSL https://api.github.com/repos/mutagen-io/mutagen/releases/latest | grep -oP '"tag_name":\s*"v\K[^"]+')
+        curl -fsSL "https://github.com/mutagen-io/mutagen/releases/download/v${MUTAGEN_VERSION}/mutagen_linux_amd64_v${MUTAGEN_VERSION}.tar.gz" -o /tmp/mutagen.tar.gz
+        tar xzf /tmp/mutagen.tar.gz -C /usr/local/bin mutagen mutagen-agents.tar.gz
+        rm /tmp/mutagen.tar.gz
+      args:
+        creates: /usr/local/bin/mutagen
+
+    - name: Install AWS CLI v2
+      shell: |
+        curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+        cd /tmp && unzip -qo awscliv2.zip && ./aws/install
+        rm -rf /tmp/aws /tmp/awscliv2.zip
+      args:
+        creates: /usr/local/bin/aws
+
+    - name: Install Atlas CLI
+      shell: curl -fL https://atlasgo.sh | sh -s -- -y
+      args:
+        creates: /usr/local/bin/atlas
+
+    # ── Tailscale ──────────────────────────────────────────────────────
+    - name: Install Tailscale
+      shell: curl -fsSL https://tailscale.com/install.sh | sh
+      args:
+        creates: /usr/bin/tailscale
+
+    - name: Enable and start tailscaled
+      systemd:
+        name: tailscaled
+        state: started
+        enabled: true
+
+    # ── GNOME Remote Desktop (RDP) ────────────────────────────────────
+    - name: Ensure gnome-remote-desktop is installed
+      dnf:
+        name: gnome-remote-desktop
+        state: present
+
+    # ── SSH Access ──────────────────────────────────────────────────────
+    - name: Add GitHub keys to authorized_keys
+      authorized_key:
+        user: warender
+        key: "{{ github_keys }}"
+        state: present
+      when: github_keys is defined and github_keys | length > 0
+
+    - name: Enable and start sshd
+      systemd:
+        name: sshd
+        state: started
+        enabled: true
+
+    - name: Disable SSH password authentication
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?PasswordAuthentication"
+        line: "PasswordAuthentication no"
+      notify: Restart sshd
+
+    # ── Prevent Sleep/Suspend ─────────────────────────────────────────
+    - name: Mask all sleep targets
+      systemd:
+        name: "{{ item }}"
+        masked: true
+      loop:
+        - sleep.target
+        - suspend.target
+        - hibernate.target
+        - hybrid-sleep.target
+
+    - name: Create logind drop-in directory
+      file:
+        path: /etc/systemd/logind.conf.d
+        state: directory
+
+    - name: Configure logind to ignore lid close
+      copy:
+        dest: /etc/systemd/logind.conf.d/nosleep.conf
+        content: |
+          [Login]
+          HandleLidSwitch=ignore
+          HandleLidSwitchExternalPower=ignore
+          HandleLidSwitchDocked=ignore
+          IdleAction=ignore
+      notify: Restart logind
+
+    # ── Battery Conservation (Lenovo) ─────────────────────────────────
+    - name: Install TLP
+      dnf:
+        name: tlp
+        state: present
+
+    - name: Enable Lenovo conservation mode (cap charge at ~60%)
+      lineinfile:
+        path: /etc/tlp.conf
+        regexp: "^#?STOP_CHARGE_THRESH_BAT0"
+        line: "STOP_CHARGE_THRESH_BAT0=1"
+
+    - name: Enable and start TLP
+      systemd:
+        name: tlp
+        state: started
+        enabled: true
+
+    # ── Passwordless sudo ──────────────────────────────────────────────
+    - name: Configure passwordless sudo for warender
+      copy:
+        dest: /etc/sudoers.d/warender
+        content: "warender ALL=(ALL) NOPASSWD: ALL\n"
+        mode: "0440"
+        validate: "visudo -cf %s"
+
+    # ── Static IP (must be last — network will drop) ──────────────────
+    - name: Set static IP address
+      command: nmcli con mod "{{ net_connection }}" ipv4.method manual ipv4.addresses 192.168.18.10/24 ipv4.gateway 192.168.18.1 ipv4.dns "1.1.1.1 1.0.0.1 8.8.8.8 8.8.4.4"
+      when: static_ip | default(false) | bool
+
+    - name: Restart NetworkManager connection
+      command: nmcli con up "{{ net_connection }}"
+      when: static_ip | default(false) | bool
+
+  handlers:
+    - name: Reload systemd
+      systemd:
+        daemon_reload: true
+
+    - name: Restart logind
+      systemd:
+        name: systemd-logind
+        state: restarted
+
+    - name: Restart sshd
+      systemd:
+        name: sshd
+        state: restarted
