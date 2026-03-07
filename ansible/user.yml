@@ -4,6 +4,15 @@
   gather_facts: false
 
   tasks:
+    # ── Workspace Layout ──────────────────────────────────────────────
+    - name: Create workspace directories
+      file:
+        path: "~/{{ item }}"
+        state: directory
+      loop:
+        - Scratch
+        - Forge
+
     # ── Java Ecosystem (SDKMAN) ───────────────────────────────────────
     - name: Install SDKMAN
       shell: curl -s "https://get.sdkman.io" | bash
@@ -107,6 +116,26 @@
         gsettings set org.gnome.desktop.session idle-delay 0
       args:
         executable: /bin/bash
+
+    # ── Git Hooks (gitleaks) ──────────────────────────────────────────
+    - name: Create global git hooks directory
+      file:
+        path: ~/.config/git/hooks
+        state: directory
+
+    - name: Install global gitleaks pre-commit hook
+      copy:
+        src: files/gitleaks-pre-commit.sh
+        dest: ~/.config/git/hooks/pre-commit
+        mode: "0755"
+
+    - name: Set global git hooks path
+      ini_file:
+        path: ~/.gitconfig
+        section: core
+        option: hooksPath
+        value: ~/.config/git/hooks
+        create: true
 
     - name: Configure Git user name
       ini_file:

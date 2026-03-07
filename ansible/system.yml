@@ -109,6 +109,7 @@
           - terraform
           - gh
           - ansible
+          - gitleaks
         state: present
 
     - name: Install Azure CLI
