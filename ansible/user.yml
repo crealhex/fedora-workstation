@@ -2,7 +2,6 @@
 - name: Configure Fedora Workstation (user)
   hosts: all
   gather_facts: false
-
   tasks:
     # ── Workspace Layout ──────────────────────────────────────────────
     - name: Create workspace directories
@@ -19,25 +18,31 @@
       args:
         creates: ~/.sdkman/bin/sdkman-init.sh
 
-    - name: Install Java versions via SDKMAN
-      shell: |
-        source ~/.sdkman/bin/sdkman-init.sh
-        sdk install java
-        JAVA_21=$(sdk list java 2>/dev/null | grep -oP '\s21\.\d+\.\d+(\.\d+)?-tem' | tr -d ' ' | head -1)
-        [ -n "$JAVA_21" ] && yes n | sdk install java $JAVA_21
-        JAVA_17=$(sdk list java 2>/dev/null | grep -oP '\s17\.\d+\.\d+(\.\d+)?-tem' | tr -d ' ' | head -1)
-        [ -n "$JAVA_17" ] && yes n | sdk install java $JAVA_17
-      args:
-        executable: /bin/bash
+    - name: Check JVM stack installed
+      stat:
+        path: "{{ item }}"
+      register: jvm_check
+      loop:
+        - ~/.sdkman/candidates/java/17.0.18-tem
+        - ~/.sdkman/candidates/java/21.0.10-tem
+        - ~/.sdkman/candidates/java/25.0.2-tem
+        - ~/.sdkman/candidates/gradle/current
+        - ~/.sdkman/candidates/maven/current
+        - ~/.sdkman/candidates/quarkus/current
 
-    - name: Install Gradle, Maven, and Quarkus via SDKMAN
+    - name: Install JVM stack via SDKMAN
       shell: |
         source ~/.sdkman/bin/sdkman-init.sh
+        sdk install java 17.0.18-tem
+        sdk install java 21.0.10-tem
+        sdk install java 25.0.2-tem
+        sdk default java 25.0.2-tem
         sdk install gradle
         sdk install maven
         sdk install quarkus
       args:
         executable: /bin/bash
+      when: jvm_check.results | selectattr('stat.exists', 'false') | list | length > 0
 
     # ── JavaScript/TypeScript ─────────────────────────────────────────
     - name: Install fnm
@@ -52,6 +57,7 @@
         fnm install --lts
       args:
         executable: /bin/bash
+        creates: ~/.local/share/fnm/aliases/lts-latest
 
     # ── Python ────────────────────────────────────────────────────────
     - name: Install uv
@@ -77,6 +83,7 @@
         bun install -g @openai/codex
       args:
         executable: /bin/bash
+        creates: ~/.bun/install/global/node_modules/@openai/codex
 
     # ── Display Config ────────────────────────────────────────────────
     - name: Create GNOME config directory
@@ -109,6 +116,13 @@
           term "screen-256color"
           truecolor on
 
+    - name: Check GNOME suspend already disabled
+      shell: gsettings get org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type
+      register: gnome_suspend
+      changed_when: false
+      args:
+        executable: /bin/bash
+
     - name: Disable GNOME automatic suspend
       shell: |
         gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
@@ -116,6 +130,7 @@
         gsettings set org.gnome.desktop.session idle-delay 0
       args:
         executable: /bin/bash
+      when: gnome_suspend.stdout != "'nothing'"
 
     # ── Git Hooks (gitleaks) ──────────────────────────────────────────
     - name: Create global git hooks directory
